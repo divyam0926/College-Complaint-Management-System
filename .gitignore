@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Environment configuration
+.env
+
+# Testing & caching
+.pytest_cache/
+.coverage
+htmlcov/
+
+# User uploads (preserve directory structure)
+uploads/*
+!uploads/.gitkeep
+
+# Local databases
+*.db
+*.sqlite3
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
