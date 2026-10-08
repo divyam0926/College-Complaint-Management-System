@@ -36,5 +36,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+# PDF documents
+*.pdf
+
 .DS_Store
 
