@@ -634,10 +634,19 @@ def admin_dashboard():
     if "user_id" not in session or session.get("role") != "admin":
         return redirect(url_for("login_page", error="Login required"))
 
+    category = request.args.get("cat", "").strip()
+    where = ""
+    params = ()
+    if category:
+        where = "WHERE complaints.category = %s"
+        params = (category,)
+
     complaints = fetch_all(
-        """SELECT complaints.*, users.name, users.register_no, users.program
+        f"""SELECT complaints.*, users.name, users.register_no, users.program
            FROM complaints JOIN users ON complaints.user_id = users.id
-           ORDER BY complaints.created_at DESC"""
+           {where}
+           ORDER BY complaints.created_at DESC""",
+        params,
     )
     stats = fetch_one(
         """SELECT COUNT(*) total,
@@ -645,38 +654,74 @@ def admin_dashboard():
            SUM(status = 'Resolved') resolved
            FROM complaints"""
     )
-    rows = "".join(
-        f"<tr><td>{item['id']}</td><td>{item['name']}</td><td>{item['category']}</td><td>{item['status']}</td><td><a href=\"{url_for('admin_reply', complaint_id=item['id'])}\" class=\"text-white\">Review</a></td></tr>"
-        for item in complaints
-    )
 
-    return base_layout(
-        "Admin Dashboard | CCMS",
-        f"""
-        <div class="container-fluid py-4">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <div class="text-uppercase small text-muted">Admin Dashboard</div>
-                    <h2 class="fw-bold mb-0">Grievance Center</h2>
-                </div>
-                <a href="{url_for('logout_page')}" class="btn btn-outline-light">Logout</a>
-            </div>
-            <div class="row g-3 mb-4">
-                <div class="col-md-4"><div class="glass p-3"><div class="small text-muted">Total</div><div class="display-6 fw-bold">{stats['total'] or 0}</div></div></div>
-                <div class="col-md-4"><div class="glass p-3"><div class="small text-muted">Pending</div><div class="display-6 fw-bold text-warning">{stats['pending'] or 0}</div></div></div>
-                <div class="col-md-4"><div class="glass p-3"><div class="small text-muted">Resolved</div><div class="display-6 fw-bold text-success">{stats['resolved'] or 0}</div></div></div>
-            </div>
-            <div class="glass p-4">
-                <h4 class="fw-bold mb-3">Complaints</h4>
-                <div class="table-responsive">
-                    <table class="table table-dark table-striped align-middle">
-                        <thead><tr><th>ID</th><th>Student</th><th>Category</th><th>Status</th><th>Action</th></tr></thead>
-                        <tbody>{rows}</tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        """,
+    rows = []
+    for row in complaints:
+        status = row["status"] or "Pending"
+        status_cls = (
+            "status-resolved"
+            if status == "Resolved"
+            else ("status-progress" if status == "In Progress" else "status-pending")
+        )
+        cat = escape(row["category"] or "")
+        desc = escape((row["description"] or "")[:50]) + ("..." if len(row.get("description", "") or "") > 50 else "")
+        rows.append(
+            f"""
+            <tr>
+                <td><strong>{escape(row['name'] or '')}</strong></td>
+                <td><code>{escape(row['register_no'] or '')}</code></td>
+                <td><small>{escape(row['program'] or '')}</small></td>
+                <td>
+                    <span class="category-badge badge-{cat.lower()}">
+                        {cat}
+                    </span>
+                </td>
+                <td><small class="text-muted">{desc}</small></td>
+                <td>
+                    <span class="status-badge {status_cls}">
+                        {escape(status)}
+                    </span>
+                </td>
+                <td>
+                    <a href="/admin/reply/{row['id']}" class="btn btn-manage">
+                        <i class="fas fa-cog me-1"></i> Manage
+                    </a>
+                </td>
+            </tr>
+            """
+        )
+
+    rows_html = "".join(rows) if rows else '<tr><td colspan="7" class="text-center py-4 text-muted">No grievances submitted yet.</td></tr>'
+
+    return legacy_ui(
+        "admin/dashboard.php",
+        link_replacements={
+            "dashboard.php?": "/admin/dashboard?",
+            "dashboard.php": "/admin/dashboard",
+            "../logout.php": "/logout",
+            "reply_complaint.php?id=": "/admin/reply/",
+        },
+        value_replacements={
+            "<?php echo date('D, d M Y'); ?>": datetime.now().strftime("%a, %d %b %Y"),
+            "<?php echo $stats['total']; ?>": str(stats["total"] or 0),
+            "<?php echo $stats['pending'] ?? 0; ?>": str(stats["pending"] or 0),
+            "<?php echo $stats['resolved'] ?? 0; ?>": str(stats["resolved"] or 0),
+            "<?php echo $category ?: 'All'; ?>": escape(category or "All"),
+            '<?php if($category == \'Academic\') echo \'selected\'; ?>': "selected" if category == "Academic" else "",
+            '<?php if($category == \'Hostel\') echo \'selected\'; ?>': "selected" if category == "Hostel" else "",
+            '<?php if($category == \'Transport\') echo \'selected\'; ?>': "selected" if category == "Transport" else "",
+            '<?php if($category == \'Infrastructure\') echo \'selected\'; ?>': "selected" if category == "Infrastructure" else "",
+            '<?php if($category == \'Others\') echo \'selected\'; ?>': "selected" if category == "Others" else "",
+            "<?php echo ($category == '') ? 'active' : ''; ?>": "active" if not category else "",
+            "<?php echo ($category == 'Academic') ? 'active' : ''; ?>": "active" if category == "Academic" else "",
+            "<?php echo ($category == 'Hostel') ? 'active' : ''; ?>": "active" if category == "Hostel" else "",
+            "<?php echo ($category == 'Transport') ? 'active' : ''; ?>": "active" if category == "Transport" else "",
+            "<?php echo ($category == 'Infrastructure') ? 'active' : ''; ?>": "active" if category == "Infrastructure" else "",
+            "<?php echo ($category == 'Others') ? 'active' : ''; ?>": "active" if category == "Others" else "",
+        },
+        body_replacements=[
+            (r'<tbody>\s*<\?php while\(.*?<\?php endwhile; \?>\s*</tbody>', f'<tbody>{rows_html}</tbody>'),
+        ],
     )
 
 
@@ -694,44 +739,63 @@ def admin_reply(complaint_id):
     if not complaint:
         return redirect(url_for("admin_dashboard"))
 
-    return base_layout(
-        "Manage Complaint | Admin",
-        f"""
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-lg-8">
-                    <div class="glass p-4 p-md-5">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h3 class="fw-bold mb-0">Review Complaint</h3>
-                            <a href="{url_for('admin_dashboard')}" class="btn btn-outline-light btn-sm">Back</a>
-                        </div>
-                        <div class="mb-4">
-                            <p class="mb-1"><strong>Student:</strong> {complaint['name']}</p>
-                            <p class="mb-1"><strong>Register No:</strong> {complaint['register_no']}</p>
-                            <p class="mb-1"><strong>Category:</strong> {complaint['category']}</p>
-                            <p class="mb-1"><strong>Status:</strong> {complaint['status']}</p>
-                            <p class="mb-0"><strong>Issue:</strong> {complaint['description']}</p>
-                        </div>
-                        <form method="post" action="{url_for('admin_reply_submit', complaint_id=complaint_id)}">
-                            <div class="mb-3">
-                                <label class="form-label">Status</label>
-                                <select class="form-select" name="status">
-                                    <option value="Pending" selected>Pending</option>
-                                    <option value="In Progress">In Progress</option>
-                                    <option value="Resolved">Resolved</option>
-                                </select>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Admin remark</label>
-                                <textarea class="form-control" rows="4" name="admin_remark" placeholder="Add remark"></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">Update</button>
-                        </form>
-                    </div>
-                </div>
+    created_at = complaint.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at_str = created_at.strftime("%b %d, %Y")
+    elif isinstance(created_at, str):
+        try:
+            created_at_str = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").strftime("%b %d, %Y")
+        except ValueError:
+            created_at_str = created_at
+    else:
+        created_at_str = ""
+
+    evidence = complaint.get("evidence_file") or ""
+    evidence_html = ""
+    if evidence:
+        evidence_html = f"""
+            <div class="evidence-section">
+                <span class="section-label">
+                    <i class="fas fa-paperclip"></i>
+                    Attached Evidence
+                </span>
+                <a href="/uploads/{escape(evidence)}" target="_blank" class="evidence-btn">
+                    <i class="fas fa-eye"></i>
+                    View Attachment
+                </a>
             </div>
-        </div>
-        """,
+        """
+
+    status = complaint.get("status") or "Pending"
+
+    return legacy_ui(
+        "admin/reply_complaint.php",
+        form_action=url_for("admin_reply_submit", complaint_id=complaint_id),
+        link_replacements={
+            "dashboard.php": "/admin/dashboard",
+            "../uploads/": "/uploads/",
+        },
+        value_replacements={
+            "<?php echo $id; ?>": str(complaint_id),
+            "<?php echo $complaint['category']; ?>": escape(complaint.get("category") or ""),
+            "<?php echo date('M d, Y', strtotime($complaint['created_at'])); ?>": created_at_str,
+            "<?php echo $complaint['name']; ?>": escape(complaint.get("name") or ""),
+            "<?php echo $complaint['register_no']; ?>": escape(complaint.get("register_no") or ""),
+            "<?php echo $complaint['program']; ?>": escape(complaint.get("program") or ""),
+            "<?php echo $complaint['email']; ?>": escape(complaint.get("email") or ""),
+            "<?php echo $complaint['description']; ?>": escape(complaint.get("description") or "").replace("\n", "<br>"),
+            "<?php echo $complaint['status']; ?>": escape(status),
+            "<?php echo $complaint['admin_remark']; ?>": escape(complaint.get("admin_remark") or ""),
+            "<?php echo $complaint['evidence_file']; ?>": escape(evidence),
+            '<?php if($complaint[\'status\'] == \'Pending\') echo \'selected\'; ?>': "selected" if status == "Pending" else "",
+            '<?php if($complaint[\'status\'] == \'In Progress\') echo \'selected\'; ?>': "selected" if status == "In Progress" else "",
+            '<?php if($complaint[\'status\'] == \'Resolved\') echo \'selected\'; ?>': "selected" if status == "Resolved" else "",
+            "<?php if(!empty($complaint['evidence_file'])): ?>": "",
+            "<?php endif; ?>": "",
+        },
+        body_replacements=[
+            (r'<\?php if\(!empty\(\$complaint\[\'evidence_file\'\]\)\): \?>.*?<\?php endif; \?>', evidence_html),
+        ],
     )
 
 
